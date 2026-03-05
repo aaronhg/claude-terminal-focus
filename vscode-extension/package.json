@@ -1,0 +1,14 @@
+{
+  "name": "claude-terminal-focus",
+  "displayName": "Claude Terminal Focus",
+  "description": "Focus Claude Code terminal tab when hook signal is received",
+  "version": "0.1.0",
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./extension.js",
+  "contributes": {}
+}
