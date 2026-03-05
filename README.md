@@ -5,10 +5,9 @@
 ![macOS](https://img.shields.io/badge/macOS-only-blue)
 ![License](https://img.shields.io/github/license/aaronhg/claude-terminal-focus)
 
-<!--
-TODO: replace with actual demo GIF
+<img src="./notification.png" alt="macOS notification from Claude Code" width="400">
+
 ![Demo](./demo.gif)
--->
 
 ## The problem
 
