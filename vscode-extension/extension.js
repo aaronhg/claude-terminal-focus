@@ -1,24 +1,29 @@
 const vscode = require('vscode');
 const fs = require('fs');
 const path = require('path');
-const { execFile } = require('child_process');
+const { execFile, execFileSync } = require('child_process');
 
 const SIGNAL_DIR = path.join(process.env.HOME, '.claude', 'hooks');
+const THINKING_FILE = path.join(SIGNAL_DIR, '.focus-thinking');
 const PENDING_FILE = path.join(SIGNAL_DIR, '.focus-pending');
 const FOCUS_FILE = path.join(SIGNAL_DIR, '.focus-signal');
-const MARKER = '● ';
-const { execFileSync } = require('child_process');
+const MARKER_DONE = '● ';
+const MARKER_THINKING = '▸ ';
 const NOTIFIER = (() => {
   try { return execFileSync('which', ['terminal-notifier'], { encoding: 'utf8' }).trim(); }
   catch { return 'terminal-notifier'; }
 })();
 
-const pending = new Map();
+// Map of terminal PID → { origName, state: 'thinking' | 'done' }
+const tracked = new Map();
 let renaming = false;
 
 function activate(context) {
   const dir = vscode.Uri.file(SIGNAL_DIR);
 
+  const thinkingWatcher = vscode.workspace.createFileSystemWatcher(
+    new vscode.RelativePattern(dir, '.focus-thinking')
+  );
   const pendingWatcher = vscode.workspace.createFileSystemWatcher(
     new vscode.RelativePattern(dir, '.focus-pending')
   );
@@ -26,6 +31,34 @@ function activate(context) {
     new vscode.RelativePattern(dir, '.focus-signal')
   );
 
+  // User submitted prompt → mark terminal with ▸
+  const onThinking = async () => {
+    let data;
+    try {
+      data = JSON.parse(fs.readFileSync(THINKING_FILE, 'utf8'));
+    } catch { return; }
+    try { fs.unlinkSync(THINKING_FILE); } catch {}
+
+    const targetPid = parseInt(data.pid, 10);
+    if (!targetPid) return;
+
+    for (const t of vscode.window.terminals) {
+      const pid = await t.processId;
+      if (pid === targetPid) {
+        if (vscode.window.activeTerminal === t) return;
+
+        const entry = tracked.get(pid);
+        if (entry && entry.state === 'thinking') return;
+
+        const origName = entry ? entry.origName : t.name;
+        tracked.set(pid, { origName, state: 'thinking' });
+        await renameTo(t, MARKER_THINKING + origName);
+        return;
+      }
+    }
+  };
+
+  // Claude finished / needs attention → mark terminal with ● and notify
   const onPending = async () => {
     let data;
     try {
@@ -39,9 +72,16 @@ function activate(context) {
     for (const t of vscode.window.terminals) {
       const pid = await t.processId;
       if (pid === targetPid) {
-        if (vscode.window.activeTerminal === t) return;
+        if (vscode.window.activeTerminal === t) {
+          // Clear thinking marker if present
+          const entry = tracked.get(pid);
+          if (entry) {
+            tracked.delete(pid);
+            await renameTo(t, entry.origName);
+          }
+          return;
+        }
 
-        // Send notification via terminal-notifier (execFile avoids shell injection)
         execFile(NOTIFIER, [
           '-title', data.title || 'Claude Code',
           '-message', data.message || 'done',
@@ -49,26 +89,16 @@ function activate(context) {
           '-execute', `echo ${targetPid} > '${FOCUS_FILE}'`
         ]);
 
-        // Mark terminal name
-        if (!pending.has(pid)) {
-          pending.set(pid, t.name);
-          renaming = true;
-          const prev = vscode.window.activeTerminal;
-          t.show(false);
-          await vscode.commands.executeCommand(
-            'workbench.action.terminal.renameWithArg',
-            { name: MARKER + t.name }
-          );
-          if (prev && prev !== t) {
-            prev.show(false);
-          }
-          renaming = false;
-        }
+        const entry = tracked.get(pid);
+        const origName = entry ? entry.origName : t.name;
+        tracked.set(pid, { origName, state: 'done' });
+        await renameTo(t, MARKER_DONE + origName);
         return;
       }
     }
   };
 
+  // User clicks notification → focus terminal
   const onFocus = async () => {
     let targetPid = 0;
     try {
@@ -81,42 +111,60 @@ function activate(context) {
       const pid = await t.processId;
       if (pid === targetPid) {
         t.show(false);
-        await clearMarker(t, pid);
+        await clearMarker(pid);
         return;
       }
     }
   };
 
+  // Clear marker when user switches to a tracked terminal
   const onActiveChange = async (t) => {
     if (!t || renaming) return;
     const pid = await t.processId;
-    if (pending.has(pid)) {
-      await clearMarker(t, pid);
+    if (tracked.has(pid)) {
+      await clearMarker(pid);
     }
   };
 
-  async function clearMarker(terminal, pid) {
-    const origName = pending.get(pid);
-    if (!origName) return;
-    pending.delete(pid);
+  async function clearMarker(pid) {
+    const entry = tracked.get(pid);
+    if (!entry) return;
+    tracked.delete(pid);
     await vscode.commands.executeCommand(
       'workbench.action.terminal.renameWithArg',
-      { name: origName }
+      { name: entry.origName }
     );
+  }
+
+  async function renameTo(terminal, name) {
+    renaming = true;
+    const prev = vscode.window.activeTerminal;
+    terminal.show(false);
+    await vscode.commands.executeCommand(
+      'workbench.action.terminal.renameWithArg',
+      { name }
+    );
+    if (prev && prev !== terminal) {
+      prev.show(false);
+    }
+    renaming = false;
   }
 
   const onClose = async (t) => {
     const pid = await t.processId;
-    if (pid) pending.delete(pid);
+    if (pid) tracked.delete(pid);
   };
 
   context.subscriptions.push(
+    thinkingWatcher.onDidCreate(onThinking),
+    thinkingWatcher.onDidChange(onThinking),
     pendingWatcher.onDidCreate(onPending),
     pendingWatcher.onDidChange(onPending),
     focusWatcher.onDidCreate(onFocus),
     focusWatcher.onDidChange(onFocus),
     vscode.window.onDidChangeActiveTerminal(onActiveChange),
     vscode.window.onDidCloseTerminal(onClose),
+    thinkingWatcher,
     pendingWatcher,
     focusWatcher
   );

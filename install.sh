@@ -24,7 +24,8 @@ SETTINGS="$CLAUDE_DIR/settings.json"
 mkdir -p "$HOOKS_DIR"
 cp "$SCRIPT_DIR/hooks/notify-stop.sh" "$HOOKS_DIR/"
 cp "$SCRIPT_DIR/hooks/notify-attention.sh" "$HOOKS_DIR/"
-chmod +x "$HOOKS_DIR/notify-stop.sh" "$HOOKS_DIR/notify-attention.sh"
+cp "$SCRIPT_DIR/hooks/notify-thinking.sh" "$HOOKS_DIR/"
+chmod +x "$HOOKS_DIR/notify-stop.sh" "$HOOKS_DIR/notify-attention.sh" "$HOOKS_DIR/notify-thinking.sh"
 echo "✓ Hook scripts installed to $HOOKS_DIR"
 
 # Install VSCode extension via symlink
@@ -35,7 +36,9 @@ echo "✓ VSCode extension linked at $EXT_DIR"
 HOOKS_JSON=$(jq -n \
   --arg stop "$HOOKS_DIR/notify-stop.sh" \
   --arg attn "$HOOKS_DIR/notify-attention.sh" \
+  --arg think "$HOOKS_DIR/notify-thinking.sh" \
   '{
+    "UserPromptSubmit": [{"hooks": [{"type": "command", "command": $think}]}],
     "Stop": [{"hooks": [{"type": "command", "command": $stop}]}],
     "Notification": [{"matcher": "permission_prompt", "hooks": [{"type": "command", "command": $attn}]}]
   }')
@@ -45,7 +48,7 @@ if [ -f "$SETTINGS" ]; then
   # Warn if Stop or Notification hooks already exist
   EXISTING=$(jq -r '.hooks // {} | keys[]' "$SETTINGS" 2>/dev/null || true)
   CONFLICT=""
-  for key in Stop Notification; do
+  for key in UserPromptSubmit Stop Notification; do
     if echo "$EXISTING" | grep -qx "$key"; then
       CONFLICT="$CONFLICT $key"
     fi

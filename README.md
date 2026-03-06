@@ -23,7 +23,8 @@ This tool sends a macOS notification when Claude Code needs you. Click the notif
 
 - **Finish notification** — shows a summary of Claude's last response
 - **Permission notification** — shows what Claude is waiting for
-- **● tab marker** — unread terminals get a `●` prefix, auto-cleared when you switch to them
+- **▸ thinking marker** — terminal tab shows `▸` while Claude is processing
+- **● done marker** — switches to `●` when Claude finishes, auto-cleared when you switch to it
 - **Smart skip** — no notification if you're already looking at that terminal
 - **Precise matching** — uses shell PID to distinguish multiple sessions
 
@@ -47,14 +48,14 @@ Then reload VSCode: `Cmd+Shift+P` → `Reload Window`.
 ## How it works
 
 ```
+You submit a prompt
+  → tab name becomes "▸ 2.1.69" (thinking)
+
 Claude Code stops
-  → Hook writes a JSON signal file (PID + message)
-  → VSCode extension reads it
-  → Is that terminal currently focused?
-    → Yes → do nothing
-    → No  → send macOS notification + add ● marker to tab name
-  → User clicks notification
-    → Focus the correct terminal + clear ● marker
+  → tab name becomes "● 2.1.69" (done)
+  → macOS notification with response summary
+  → click notification → focus the correct terminal
+  → or switch to it manually → marker clears
 ```
 
 The hook script discovers the terminal's shell PID by walking up the process tree (`hook → claude → shell`). The VSCode extension matches this against `terminal.processId` to find the right tab.
@@ -63,7 +64,7 @@ The hook script discovers the terminal's shell PID by walking up the process tre
 
 | Component | Location |
 |-----------|----------|
-| Hook scripts | `~/.claude/hooks/notify-stop.sh`, `notify-attention.sh` |
+| Hook scripts | `~/.claude/hooks/notify-thinking.sh`, `notify-stop.sh`, `notify-attention.sh` |
 | VSCode extension | `~/.vscode/extensions/claude-terminal-focus` (symlink) |
 | Hook config | Merged into `~/.claude/settings.json` |
 
