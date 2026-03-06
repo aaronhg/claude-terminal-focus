@@ -22,5 +22,12 @@ if [ -f "$SETTINGS" ] && command -v jq &>/dev/null; then
   echo "✓ Hooks removed from $SETTINGS"
 fi
 
+# Remove LaunchAgent
+PLIST_LABEL="com.aaron.claude-menubar"
+PLIST_PATH="$HOME/Library/LaunchAgents/$PLIST_LABEL.plist"
+launchctl bootout "gui/$(id -u)/$PLIST_LABEL" 2>/dev/null || true
+rm -f "$PLIST_PATH"
+echo "✓ LaunchAgent removed"
+
 echo ""
 echo "Done. Reload VSCode: Cmd+Shift+P → Reload Window"

@@ -70,9 +70,11 @@ The menubar app shows all active Claude Code sessions in a dropdown list, across
 - **Click** an item → focuses the correct VSCode window and terminal tab
 - **Swipe left** (trackpad two-finger) → dismisses the item
 - **Badge count** on the tray icon shows how many sessions need attention
+- **Auto-starts on login** via macOS LaunchAgent
 
 ```bash
-cd menubar-app && npm start
+./start.sh   # Restart (e.g. after code changes)
+./stop.sh    # Stop
 ```
 
 ## What gets installed
@@ -83,6 +85,7 @@ cd menubar-app && npm start
 | VSCode extension | `~/.vscode/extensions/claude-terminal-focus` (symlink) |
 | Menubar app | `menubar-app/` (Electron + menubar) |
 | Hook config | Merged into `~/.claude/settings.json` |
+| LaunchAgent | `~/Library/LaunchAgents/com.aaron.claude-menubar.plist` |
 | Shared state | `~/.claude/hooks/.focus-state.json` (all sessions) |
 
 The install script merges hook config into your existing settings without overwriting anything else. If you already have `Stop` or `Notification` hooks, it will ask before overwriting.

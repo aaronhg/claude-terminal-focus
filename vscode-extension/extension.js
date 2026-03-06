@@ -17,6 +17,8 @@ const NOTIFIER = (() => {
 // Map of terminal PID → { origName, state: 'thinking' | 'done' }
 const tracked = new Map();
 let renaming = false;
+// Debounce: PID → timestamp of last notification
+const lastNotified = new Map();
 
 function activate(context) {
   const dir = vscode.Uri.file(SIGNAL_DIR);
@@ -80,12 +82,18 @@ function activate(context) {
           return;
         }
 
-        execFile(NOTIFIER, [
-          '-title', data.title || 'Claude Code',
-          '-message', data.message || 'done',
-          '-sound', data.sound || 'Glass',
-          '-execute', `echo ${targetPid} > '${FOCUS_FILE}'`
-        ]);
+        // Debounce: suppress duplicate notifications within 2s
+        const now = Date.now();
+        const last = lastNotified.get(targetPid) || 0;
+        if (now - last >= 2000) {
+          lastNotified.set(targetPid, now);
+          execFile(NOTIFIER, [
+            '-title', data.title || 'Claude Code',
+            '-message', data.message || 'done',
+            '-sound', data.sound || 'Glass',
+            '-execute', `echo ${targetPid} > '${FOCUS_FILE}'`
+          ]);
+        }
 
         const entry = tracked.get(pid);
         const origName = entry ? entry.origName : t.name;
@@ -156,7 +164,10 @@ function activate(context) {
 
   const onClose = async (t) => {
     const pid = await t.processId;
-    if (pid) tracked.delete(pid);
+    if (pid) {
+      tracked.delete(pid);
+      lastNotified.delete(pid);
+    }
   };
 
   context.subscriptions.push(

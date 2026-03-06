@@ -109,6 +109,17 @@ Key iteration: IPC between main and renderer was unreliable with the `menubar` p
 
 The three hook scripts shared ~80% identical code for upserting `_focus-state.json`. Extracted to `_upsert-state.sh` sourced by each hook, reducing each to its unique signal file logic + a one-line `source` call.
 
+### 12. LaunchAgent management
+
+Previously the menubar app required manual `cd menubar-app && npm start`. Added macOS LaunchAgent integration:
+
+- `install.sh` dynamically generates a plist at `~/Library/LaunchAgents/com.aaron.claude-menubar.plist` with resolved paths (supports nvm by detecting `$(which node)` directory)
+- `RunAtLoad: true` for login auto-start, `KeepAlive: false` so manual stop stays stopped
+- `start.sh` / `stop.sh` wrappers around `launchctl bootstrap` / `bootout` (modern API, not deprecated `load`/`unload`)
+- `uninstall.sh` cleans up the plist
+
+Key iteration: the electron shim at `node_modules/.bin/electron` (a symlink to `cli.js`) fails with EPERM under LaunchAgent's restricted environment. Fix: point `ProgramArguments` directly at `electron/dist/Electron.app/Contents/MacOS/Electron`.
+
 ## Key decisions
 
 | Decision | Why |
@@ -122,3 +133,5 @@ The three hook scripts shared ~80% identical code for upserting `_focus-state.js
 | `fs.watch` + 3s polling | macOS `fs.watch` misses atomic `mv` writes; polling ensures consistency |
 | Shared `_upsert-state.sh` | Eliminates duplicated jq upsert logic across 3 hook scripts |
 | Atomic file writes (`tmp` + `mv`) | Prevents readers from seeing partial JSON |
+| LaunchAgent, not login item | `launchctl bootstrap/bootout` gives precise start/stop control; `RunAtLoad` for login auto-start |
+| Direct Electron binary in plist | `node_modules/.bin/electron` shim gets EPERM under LaunchAgent |
