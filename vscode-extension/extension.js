@@ -37,7 +37,6 @@ function activate(context) {
     try {
       data = JSON.parse(fs.readFileSync(THINKING_FILE, 'utf8'));
     } catch { return; }
-    try { fs.unlinkSync(THINKING_FILE); } catch {}
 
     const targetPid = parseInt(data.pid, 10);
     if (!targetPid) return;
@@ -64,7 +63,6 @@ function activate(context) {
     try {
       data = JSON.parse(fs.readFileSync(PENDING_FILE, 'utf8'));
     } catch { return; }
-    try { fs.unlinkSync(PENDING_FILE); } catch {}
 
     const targetPid = parseInt(data.pid, 10);
     if (!targetPid) return;
