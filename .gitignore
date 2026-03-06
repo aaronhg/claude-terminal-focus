@@ -2,3 +2,6 @@
 hooks/.focus-thinking
 hooks/.focus-pending
 hooks/.focus-signal
+hooks/.focus-state.json
+hooks/.focus-state.json.tmp
+menubar-app/node_modules/

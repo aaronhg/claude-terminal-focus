@@ -72,7 +72,7 @@ function activate(context) {
     for (const t of vscode.window.terminals) {
       const pid = await t.processId;
       if (pid === targetPid) {
-        if (vscode.window.activeTerminal === t) {
+        if (vscode.window.state.focused && vscode.window.activeTerminal === t) {
           // Clear thinking marker if present
           const entry = tracked.get(pid);
           if (entry) {
@@ -104,12 +104,18 @@ function activate(context) {
     try {
       targetPid = parseInt(fs.readFileSync(FOCUS_FILE, 'utf8').trim(), 10);
     } catch {}
-    try { fs.unlinkSync(FOCUS_FILE); } catch {}
     if (!targetPid) return;
 
     for (const t of vscode.window.terminals) {
       const pid = await t.processId;
       if (pid === targetPid) {
+        try { fs.unlinkSync(FOCUS_FILE); } catch {}
+        // Activate this VSCode window via CLI, then focus terminal
+        const folder = vscode.workspace.workspaceFolders?.[0]?.uri?.fsPath;
+        if (folder) {
+          execFile('code', [folder]);
+          await new Promise(r => setTimeout(r, 600));
+        }
         t.show(false);
         await clearMarker(pid);
         return;

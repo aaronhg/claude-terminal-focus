@@ -69,5 +69,12 @@ else
 fi
 echo "✓ Hooks merged into $SETTINGS"
 
+# Install menubar app dependencies
+if [ -d "$SCRIPT_DIR/menubar-app" ]; then
+  echo "Installing menubar app dependencies..."
+  (cd "$SCRIPT_DIR/menubar-app" && npm install)
+  echo "✓ Menubar app ready (run: cd $SCRIPT_DIR/menubar-app && npm start)"
+fi
+
 echo ""
 echo "Done. Reload VSCode: Cmd+Shift+P → Reload Window"

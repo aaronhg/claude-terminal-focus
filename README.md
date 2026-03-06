@@ -27,6 +27,7 @@ This tool sends a macOS notification when Claude Code needs you. Click the notif
 - **● done marker** — switches to `●` when Claude finishes, auto-cleared when you switch to it
 - **Smart skip** — no notification if you're already looking at that terminal
 - **Precise matching** — uses shell PID to distinguish multiple sessions
+- **Menubar app** — global overview of all Claude Code sessions across all VSCode windows; click to focus, swipe to dismiss
 
 ## Install
 
@@ -60,13 +61,29 @@ Claude Code stops
 
 The hook script discovers the terminal's shell PID by walking up the process tree (`hook → claude → shell`). The VSCode extension matches this against `terminal.processId` to find the right tab.
 
+### Menubar app
+
+<img src="./menubar.png" alt="Menubar app showing Claude Code session" width="400">
+
+The menubar app shows all active Claude Code sessions in a dropdown list, across all VSCode windows.
+
+- **Click** an item → focuses the correct VSCode window and terminal tab
+- **Swipe left** (trackpad two-finger) → dismisses the item
+- **Badge count** on the tray icon shows how many sessions need attention
+
+```bash
+cd menubar-app && npm start
+```
+
 ## What gets installed
 
 | Component | Location |
 |-----------|----------|
-| Hook scripts | `~/.claude/hooks/notify-thinking.sh`, `notify-stop.sh`, `notify-attention.sh` |
+| Hook scripts | `~/.claude/hooks/notify-thinking.sh`, `notify-stop.sh`, `notify-attention.sh`, `_upsert-state.sh` |
 | VSCode extension | `~/.vscode/extensions/claude-terminal-focus` (symlink) |
+| Menubar app | `menubar-app/` (Electron + menubar) |
 | Hook config | Merged into `~/.claude/settings.json` |
+| Shared state | `~/.claude/hooks/.focus-state.json` (all sessions) |
 
 The install script merges hook config into your existing settings without overwriting anything else. If you already have `Stop` or `Notification` hooks, it will ask before overwriting.
 

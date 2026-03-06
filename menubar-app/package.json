@@ -1,0 +1,13 @@
+{
+  "name": "claude-menubar",
+  "version": "1.0.0",
+  "description": "Menubar app for Claude Code session overview",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "dependencies": {
+    "electron": "^33.0.0",
+    "menubar": "^9.5.0"
+  }
+}

@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Helvetica Neue', sans-serif;
+    font-size: 13px;
+    background: #1e1e1e;
+    color: #ccc;
+    overflow: hidden;
+    user-select: none;
+    -webkit-app-region: no-drag;
+  }
+  #header {
+    padding: 10px 14px;
+    font-size: 13px;
+    font-weight: 600;
+    color: #e0e0e0;
+    border-bottom: 1px solid #333;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  #refresh {
+    background: none;
+    border: none;
+    color: #888;
+    font-size: 22px;
+    cursor: pointer;
+    padding: 2px 4px;
+    line-height: 1;
+    border-radius: 4px;
+  }
+  #refresh:hover { color: #ccc; background: rgba(255,255,255,0.08); }
+  #list {
+    overflow-y: auto;
+    max-height: 360px;
+  }
+  .item {
+    border-bottom: 1px solid #2a2a2a;
+    overflow: hidden;
+  }
+  .item-inner {
+    padding: 10px 12px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    transition: transform 0.15s, background 0.15s, opacity 0.15s;
+  }
+  .item-inner:hover { background: #2a2a2a; }
+  .item.swiping .item-inner { transition: none; }
+  .icon {
+    flex-shrink: 0;
+    width: 18px;
+    text-align: center;
+    font-size: 14px;
+  }
+  .info {
+    flex: 1;
+    min-width: 0;
+  }
+  .name {
+    font-weight: 600;
+    color: #e0e0e0;
+    font-size: 13px;
+  }
+  .message {
+    color: #888;
+    font-size: 11px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-top: 2px;
+  }
+  .time {
+    flex-shrink: 0;
+    color: #666;
+    font-size: 10px;
+  }
+  .icon { color: #ffffff; }
+  #empty {
+    padding: 40px 12px;
+    text-align: center;
+    color: #666;
+  }
+</style>
+</head>
+<body>
+<div id="header"><span>Claude Code Sessions</span><button id="refresh" onclick="render(readStateFile())">&#x21bb;</button></div>
+<div id="list"></div>
+<div id="empty" style="display:none">No active sessions</div>
+
+<script>
+const fs = require('fs');
+const path = require('path');
+const os = require('os');
+
+const HOOKS_DIR = path.join(os.homedir(), '.claude', 'hooks');
+const STATE_FILE = path.join(HOOKS_DIR, '.focus-state.json');
+const SIGNAL_FILE = path.join(HOOKS_DIR, '.focus-signal');
+
+function readStateFile() {
+  try { return JSON.parse(fs.readFileSync(STATE_FILE, 'utf-8')); }
+  catch { return []; }
+}
+
+function writeSignal(pid) {
+  fs.writeFileSync(SIGNAL_FILE, String(pid));
+}
+
+function dismissFromFile(pid) {
+  try {
+    const data = readStateFile().filter(s => s.pid !== pid);
+    const tmp = STATE_FILE + '.tmp';
+    fs.writeFileSync(tmp, JSON.stringify(data, null, 2));
+    fs.renameSync(tmp, STATE_FILE);
+  } catch {}
+}
+
+const list = document.getElementById('list');
+const empty = document.getElementById('empty');
+
+let pendingRender = null;
+let lastStateJson = '';
+
+const STATE_ICONS = {
+  thinking: '\u25B6',
+  done: '\u25CF',
+  attention: '\u25CF',
+};
+
+function formatTime(ts) {
+  const diff = Math.floor(Date.now() / 1000) - ts;
+  if (diff < 60) return 'now';
+  if (diff < 3600) return `${Math.floor(diff / 60)}m`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)}h`;
+  return `${Math.floor(diff / 86400)}d`;
+}
+
+function dirName(cwd) {
+  return path.basename(cwd) || cwd;
+}
+
+const _escDiv = document.createElement('div');
+function escapeHtml(str) {
+  _escDiv.textContent = str;
+  return _escDiv.innerHTML;
+}
+
+function render(state) {
+  if (document.querySelector('.item.swiping')) {
+    pendingRender = state;
+    return;
+  }
+  pendingRender = null;
+
+  const json = JSON.stringify(state);
+  if (json === lastStateJson) return;
+  lastStateJson = json;
+
+  if (!state || state.length === 0) {
+    list.innerHTML = '';
+    empty.style.display = 'block';
+    return;
+  }
+  empty.style.display = 'none';
+  state.sort((a, b) => b.timestamp - a.timestamp);
+
+  list.innerHTML = state.map(s => `
+    <div class="item state-${s.state}" data-pid="${s.pid}">
+      <div class="item-inner">
+        <div class="icon">${STATE_ICONS[s.state] || '\u25CB'}</div>
+        <div class="info">
+          <div class="name">${escapeHtml(dirName(s.cwd))}</div>
+          ${s.message ? `<div class="message">${escapeHtml(s.message)}</div>` : ''}
+        </div>
+        <div class="time">${formatTime(s.timestamp)}</div>
+      </div>
+    </div>
+  `).join('');
+
+  list.querySelectorAll('.item').forEach(setupItem);
+}
+
+function setupItem(item) {
+  const pid = Number(item.dataset.pid);
+  const inner = item.querySelector('.item-inner');
+  const THRESHOLD = 180; // > half width to dismiss
+  let offsetX = 0;
+  let decayTimer = null;
+  let triggered = false;
+
+  // Wheel on the .item container (stays in place), moves .item-inner visually
+  item.addEventListener('wheel', (e) => {
+    if (Math.abs(e.deltaX) < Math.abs(e.deltaY)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (triggered) return;
+
+    clearTimeout(decayTimer);
+    offsetX += e.deltaX * -1.5;
+    offsetX = Math.max(-360, Math.min(0, offsetX)); // only allow left swipe
+
+    item.classList.add('swiping');
+    inner.style.transform = `translateX(${offsetX}px)`;
+
+    if (offsetX < -THRESHOLD) {
+      // Left swipe -> dismiss
+      triggered = true;
+      item.classList.remove('swiping');
+      inner.style.transition = 'transform 0.2s, opacity 0.2s';
+      inner.style.transform = 'translateX(-100%)';
+      inner.style.opacity = '0';
+      setTimeout(() => {
+        dismissFromFile(pid);
+        setTimeout(() => render(readStateFile()), 50);
+      }, 200);
+      return;
+    }
+
+    decayTimer = setTimeout(() => {
+      item.classList.remove('swiping');
+      offsetX = 0;
+      inner.style.transition = 'transform 0.15s';
+      inner.style.transform = '';
+      setTimeout(() => { inner.style.transition = ''; }, 150);
+      if (pendingRender) render(pendingRender);
+    }, 200);
+  }, { passive: false });
+
+  inner.addEventListener('mousedown', (e) => {
+    e.preventDefault();
+    if (triggered) return;
+    writeSignal(pid);
+    window.blur();
+  });
+}
+
+// Watch state file (unreliable on macOS with atomic mv) + poll fallback
+fs.watch(STATE_FILE, { persistent: false }, () => {
+  setTimeout(() => render(readStateFile()), 100);
+});
+setTimeout(() => render(readStateFile()), 100);
+setInterval(() => render(readStateFile()), 3000);
+</script>
+</body>
+</html>

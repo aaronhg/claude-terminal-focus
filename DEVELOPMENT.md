@@ -72,20 +72,42 @@ Extracted from scattered files in `~/.claude/` into a self-contained directory w
 ```
 Hook script (runs in Claude Code process)
   │
-  ▼ writes JSON
-~/.claude/hooks/.focus-pending
+  ├─▶ writes .focus-pending / .focus-thinking (per-window signal)
+  │     │
+  │     ▼ FileSystemWatcher
+  │   VSCode extension
+  │     ├─ activeTerminal? → skip
+  │     ├─ execFile terminal-notifier
+  │     │    └─ on click → writes .focus-signal
+  │     └─ rename terminal: "● 2.1.69"
+  │          └─ onDidChangeActiveTerminal → rename back
   │
-  ▼ FileSystemWatcher
-VSCode extension
-  │
-  ├─ activeTerminal? → skip
-  │
-  ├─ execFile terminal-notifier
-  │    └─ on click → writes .focus-signal
-  │
-  └─ rename terminal: "● 2.1.69"
-       └─ onDidChangeActiveTerminal → rename back: "2.1.69"
+  └─▶ upserts .focus-state.json (shared across all sessions)
+        │
+        ▼ fs.watch + 3s poll
+      Menubar app (Electron)
+        ├─ tray badge: count of done/attention sessions
+        ├─ click item → writes .focus-signal → extension focuses terminal
+        └─ swipe left → removes from state.json
 ```
+
+### 10. Menubar app (global session overview)
+
+With multiple VSCode windows running Claude Code simultaneously, there was no single place to see all sessions. VSCode extension API can't access terminals across windows.
+
+Built an Electron menubar app using the `menubar` npm package:
+- Hook scripts upsert a shared `~/.claude/hooks/.focus-state.json` with session state (thinking/done/attention)
+- Menubar app watches the state file + polls every 3s (macOS `fs.watch` is unreliable with atomic `mv` writes)
+- Renderer uses `nodeIntegration: true` + `sandbox: false` for direct `fs` access, bypassing IPC entirely
+- Click item → writes `.focus-signal` → VSCode extension picks it up and focuses the correct window + terminal
+- Swipe left to dismiss (trackpad two-finger gesture via `wheel` event, threshold at half-width)
+- Tray badge shows count of sessions needing attention
+
+Key iteration: IPC between main and renderer was unreliable with the `menubar` package (popup blur racing with click events). Switching to direct `require('fs')` in the renderer eliminated the entire IPC layer.
+
+### 11. Shell hook deduplication
+
+The three hook scripts shared ~80% identical code for upserting `_focus-state.json`. Extracted to `_upsert-state.sh` sourced by each hook, reducing each to its unique signal file logic + a one-line `source` call.
 
 ## Key decisions
 
@@ -96,3 +118,7 @@ VSCode extension
 | Notification logic in extension, not hook | Extension knows which terminal is active; hook doesn't |
 | `execFile` over `exec` | Prevents shell injection from message content |
 | `jq` for settings merge | Preserves existing user settings, no manual JSON editing |
+| Direct `fs` in renderer, no IPC | `menubar` popup blur races with click events; direct fs eliminates the problem |
+| `fs.watch` + 3s polling | macOS `fs.watch` misses atomic `mv` writes; polling ensures consistency |
+| Shared `_upsert-state.sh` | Eliminates duplicated jq upsert logic across 3 hook scripts |
+| Atomic file writes (`tmp` + `mv`) | Prevents readers from seeing partial JSON |
