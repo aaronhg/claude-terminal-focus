@@ -170,7 +170,7 @@ function render(state) {
   state.sort((a, b) => b.timestamp - a.timestamp);
 
   list.innerHTML = state.map(s => `
-    <div class="item state-${s.state}" data-pid="${s.pid}">
+    <div class="item state-${escapeHtml(s.state)}" data-pid="${escapeHtml(String(s.pid))}">
       <div class="item-inner">
         <div class="icon">${STATE_ICONS[s.state] || '\u25CB'}</div>
         <div class="info">
