@@ -11,8 +11,12 @@ NOW=$(date +%s)
 [ -f "$STATE_FILE" ] && CURRENT=$(cat "$STATE_FILE") || CURRENT="[]"
 UPDATED=$(echo "$CURRENT" | jq --arg pid "$TERMINAL_SHELL_PID" --arg cwd "$CWD" --arg state "$STATE" --arg msg "$MESSAGE" --argjson ts "$NOW" \
   'if any(.[]; .pid == ($pid | tonumber)) then
-     map(if .pid == ($pid | tonumber) then .state = $state | .message = $msg | .timestamp = $ts else . end)
+     map(if .pid == ($pid | tonumber) then
+       .state = $state | .message = $msg | .timestamp = $ts |
+       if $state == "thinking" then .startedAt = $ts else . end
+     else . end)
    else
-     . + [{"pid": ($pid | tonumber), "cwd": $cwd, "state": $state, "message": $msg, "timestamp": $ts}]
+     . + [{"pid": ($pid | tonumber), "cwd": $cwd, "state": $state, "message": $msg, "timestamp": $ts} |
+       if $state == "thinking" then .startedAt = $ts else . end]
    end')
 echo "$UPDATED" > "$STATE_FILE.tmp" && mv "$STATE_FILE.tmp" "$STATE_FILE"

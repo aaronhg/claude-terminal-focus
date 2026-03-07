@@ -7,12 +7,25 @@ const SIGNAL_DIR = path.join(process.env.HOME, '.claude', 'hooks');
 const THINKING_FILE = path.join(SIGNAL_DIR, '.focus-thinking');
 const PENDING_FILE = path.join(SIGNAL_DIR, '.focus-pending');
 const FOCUS_FILE = path.join(SIGNAL_DIR, '.focus-signal');
+const STATE_FILE = path.join(SIGNAL_DIR, '.focus-state.json');
 const MARKER_DONE = '● ';
 const MARKER_THINKING = '▸ ';
 const NOTIFIER = (() => {
   try { return execFileSync('which', ['terminal-notifier'], { encoding: 'utf8' }).trim(); }
   catch { return 'terminal-notifier'; }
 })();
+
+function ackStateFile(pid) {
+  try {
+    const data = JSON.parse(fs.readFileSync(STATE_FILE, 'utf-8')).map(s =>
+      s.pid === pid && (s.state === 'done' || s.state === 'attention')
+        ? { ...s, state: 'seen' } : s
+    );
+    const tmp = STATE_FILE + '.tmp';
+    fs.writeFileSync(tmp, JSON.stringify(data, null, 2));
+    fs.renameSync(tmp, STATE_FILE);
+  } catch {}
+}
 
 // Map of terminal PID → { origName, state: 'thinking' | 'done' }
 const tracked = new Map();
@@ -79,6 +92,7 @@ function activate(context) {
             tracked.delete(pid);
             await renameTo(t, entry.origName);
           }
+          ackStateFile(targetPid);
           return;
         }
 
@@ -124,6 +138,7 @@ function activate(context) {
         }
         t.show(false);
         await clearMarker(pid);
+        ackStateFile(targetPid);
         return;
       }
     }
@@ -135,6 +150,7 @@ function activate(context) {
     const pid = await t.processId;
     if (tracked.has(pid)) {
       await clearMarker(pid);
+      ackStateFile(pid);
     }
   };
 

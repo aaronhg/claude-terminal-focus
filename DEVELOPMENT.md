@@ -105,6 +105,16 @@ Built an Electron menubar app using the `menubar` npm package:
 
 Key iteration: IPC between main and renderer was unreliable with the `menubar` package (popup blur racing with click events). Switching to direct `require('fs')` in the renderer eliminated the entire IPC layer.
 
+### 10b. Menubar enhancements (duration, global shortcut, Clear button)
+
+Three additions to the menubar app:
+
+- **Duration display**: Hook scripts set `startedAt` timestamp when entering `thinking` state. Renderer shows elapsed time for thinking sessions and "took Xm Ys" for completed ones. Uses existing 3s poll cycle for updates.
+- **Global shortcut (`Cmd+Shift+C`)**: Registered via Electron `globalShortcut` in main process. Reads state file, finds the most recent `attention`/`done` session (fallback to `thinking`), writes its PID to `.focus-signal`. Unregistered on `will-quit`.
+- **Clear (⌫) button**: Bulk-dismisses all `seen` and `dead` sessions from state file. Uses the shared `updateStateFile(transformFn)` helper that deduplicates the atomic read-transform-write pattern across `dismissFromFile`, `dismissAllInactive`, and `ackInFile`.
+
+Key iteration: the `⌫` (U+232B) glyph renders larger than `↻` at the same font-size. Fixed with per-glyph font-size compensation via inline style.
+
 ### 11. Shell hook deduplication
 
 The three hook scripts shared ~80% identical code for upserting `_focus-state.json`. Extracted to `_upsert-state.sh` sourced by each hook, reducing each to its unique signal file logic + a one-line `source` call.
@@ -130,6 +140,9 @@ Key iteration: the electron shim at `node_modules/.bin/electron` (a symlink to `
 | `execFile` over `exec` | Prevents shell injection from message content |
 | `jq` for settings merge | Preserves existing user settings, no manual JSON editing |
 | Direct `fs` in renderer, no IPC | `menubar` popup blur races with click events; direct fs eliminates the problem |
+| All HTML via `escapeHtml()` | `nodeIntegration: true` means any XSS = RCE; every interpolated value must be escaped |
+| `startedAt` only set on `thinking` | Other state transitions preserve existing `startedAt` so duration = `timestamp - startedAt` |
+| `Cmd+Shift+C` global shortcut | Electron `globalShortcut` — prefers attention/done, falls back to thinking |
 | `fs.watch` + 3s polling | macOS `fs.watch` misses atomic `mv` writes; polling ensures consistency |
 | Shared `_upsert-state.sh` | Eliminates duplicated jq upsert logic across 3 hook scripts |
 | Atomic file writes (`tmp` + `mv`) | Prevents readers from seeing partial JSON |

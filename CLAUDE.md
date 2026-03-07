@@ -30,6 +30,8 @@ Hook scripts (bash, run by Claude Code process)
         +- tray badge count
         +- click -> writes .focus-signal -> extension focuses terminal
         +- swipe left -> dismisses from state
+        +- Clear button -> dismisses all seen/dead sessions
+        +- Cmd+Shift+C -> focuses most recent attention/done session
 ```
 
 **Terminal identification**: Hook scripts walk the process tree (`$PPID` -> parent's PPID) to find the terminal shell PID. The VSCode extension matches this against `terminal.processId`. This is the only reliable way to distinguish multiple Claude Code sessions.
@@ -46,8 +48,8 @@ Hook scripts (bash, run by Claude Code process)
 | `hooks/_upsert-state.sh` | Shared helper sourced by all hooks to update `.focus-state.json` |
 | `vscode-extension/extension.js` | VSCode extension - watches signal files, manages tab markers, sends notifications |
 | `vscode-extension/package.json` | Extension manifest (activates onStartupFinished) |
-| `menubar-app/main.js` | Electron main process - tray icon, badge count |
-| `menubar-app/index.html` | Renderer - session list UI with swipe-to-dismiss |
+| `menubar-app/main.js` | Electron main process - tray icon, badge count, global shortcut |
+| `menubar-app/index.html` | Renderer - session list UI with swipe-to-dismiss, duration display, Clear button |
 | `install.sh` | Copies hooks, symlinks extension, merges settings.json, installs LaunchAgent, starts menubar app |
 | `uninstall.sh` | Reverses install (including LaunchAgent removal) |
 | `start.sh` | Restart menubar app (bootout + bootstrap) |
@@ -60,6 +62,9 @@ Hook scripts (bash, run by Claude Code process)
 - **Terminal rename uses `workbench.action.terminal.renameWithArg`** command because `Terminal.name` is readonly. A `renaming` flag suppresses `onDidChangeActiveTerminal` during rename to prevent race conditions.
 - **Menubar renderer uses `nodeIntegration: true` with direct `require('fs')`** instead of IPC. The `menubar` package's popup blur races with click events, making IPC unreliable.
 - **`fs.watch` + 3s polling** because macOS `fs.watch` misses atomic `mv` writes.
+- **`startedAt` in state JSON** tracks when a session entered `thinking` state. The renderer computes elapsed time (thinking) or total duration (done/seen) from this field.
+- **`Cmd+Shift+C` global shortcut** registered via Electron `globalShortcut`. Finds the most recent `attention`/`done` session (fallback to `thinking`) and writes its PID to `.focus-signal`.
+- **All HTML interpolation uses `escapeHtml()`** because `nodeIntegration: true` means any XSS = RCE. Never interpolate state data into HTML without escaping.
 
 ## Running
 

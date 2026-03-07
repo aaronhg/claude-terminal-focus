@@ -23,17 +23,20 @@
     justify-content: space-between;
     align-items: center;
   }
-  #refresh {
+  .header-btn {
     background: none;
     border: none;
     color: #888;
-    font-size: 22px;
+    font-size: 16px;
     cursor: pointer;
     padding: 2px 4px;
     line-height: 1;
     border-radius: 4px;
   }
-  #refresh:hover { color: #ccc; background: rgba(255,255,255,0.08); }
+  .header-btn:hover { color: #ccc; background: rgba(255,255,255,0.08); }
+  #clear:disabled { opacity: 0.3; cursor: default; }
+  #clear:disabled:hover { color: #888; background: none; }
+  .header-actions { display: flex; align-items: center; gap: 4px; }
   #list {
     overflow-y: auto;
     max-height: 360px;
@@ -81,6 +84,7 @@
     font-size: 10px;
   }
   .icon { color: #ffffff; }
+  .item.state-dead .item-inner { opacity: 0.45; }
   #empty {
     padding: 40px 12px;
     text-align: center;
@@ -89,7 +93,7 @@
 </style>
 </head>
 <body>
-<div id="header"><span>Claude Code Sessions</span><button id="refresh" onclick="render(readStateFile())">&#x21bb;</button></div>
+<div id="header"><span>Claude Code Sessions</span><div class="header-actions"><button id="clear" class="header-btn" style="font-size:13px" onclick="dismissAllInactive()" disabled>&#x232B;</button><button id="refresh" class="header-btn" onclick="render(readStateFile())">&#x21bb;</button></div></div>
 <div id="list"></div>
 <div id="empty" style="display:none">No active sessions</div>
 
@@ -111,13 +115,31 @@ function writeSignal(pid) {
   fs.writeFileSync(SIGNAL_FILE, String(pid));
 }
 
+function updateStateFile(transformFn) {
+  const data = transformFn(readStateFile());
+  const tmp = STATE_FILE + '.tmp';
+  fs.writeFileSync(tmp, JSON.stringify(data, null, 2));
+  fs.renameSync(tmp, STATE_FILE);
+  return data;
+}
+
 function dismissFromFile(pid) {
+  try { return updateStateFile(s => s.filter(x => x.pid !== pid)); }
+  catch { return []; }
+}
+
+function dismissAllInactive() {
+  try { render(updateStateFile(s => s.filter(x => x.state !== 'seen' && x.state !== 'dead'))); }
+  catch {}
+}
+
+function ackInFile(pid) {
   try {
-    const data = readStateFile().filter(s => s.pid !== pid);
-    const tmp = STATE_FILE + '.tmp';
-    fs.writeFileSync(tmp, JSON.stringify(data, null, 2));
-    fs.renameSync(tmp, STATE_FILE);
-  } catch {}
+    return updateStateFile(s => s.map(x =>
+      x.pid === pid && (x.state === 'done' || x.state === 'attention')
+        ? { ...x, state: 'seen' } : x
+    ));
+  } catch { return null; }
 }
 
 const list = document.getElementById('list');
@@ -125,11 +147,13 @@ const empty = document.getElementById('empty');
 
 let pendingRender = null;
 let lastStateJson = '';
-
+let swipeCooldown = false;
 const STATE_ICONS = {
   thinking: '\u25B6',
   done: '\u25CF',
   attention: '\u25CF',
+  dead: '',
+  seen: '',
 };
 
 function formatTime(ts) {
@@ -138,6 +162,25 @@ function formatTime(ts) {
   if (diff < 3600) return `${Math.floor(diff / 60)}m`;
   if (diff < 86400) return `${Math.floor(diff / 3600)}h`;
   return `${Math.floor(diff / 86400)}d`;
+}
+
+function formatDuration(seconds) {
+  if (seconds < 60) return `${seconds}s`;
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  return s > 0 ? `${m}m ${s}s` : `${m}m`;
+}
+
+function durationText(s) {
+  if (s.state === 'thinking' && s.startedAt) {
+    const elapsed = Math.floor(Date.now() / 1000) - s.startedAt;
+    return formatDuration(elapsed);
+  }
+  if ((s.state === 'done' || s.state === 'attention' || s.state === 'seen') && s.startedAt) {
+    const dur = s.timestamp - s.startedAt;
+    return `took ${formatDuration(dur)}`;
+  }
+  return '';
 }
 
 function dirName(cwd) {
@@ -169,18 +212,24 @@ function render(state) {
   empty.style.display = 'none';
   state.sort((a, b) => b.timestamp - a.timestamp);
 
-  list.innerHTML = state.map(s => `
+  const hasInactive = state.some(s => s.state === 'seen' || s.state === 'dead');
+  document.getElementById('clear').disabled = !hasInactive;
+
+  list.innerHTML = state.map(s => {
+    const dur = durationText(s);
+    return `
     <div class="item state-${escapeHtml(s.state)}" data-pid="${escapeHtml(String(s.pid))}">
       <div class="item-inner">
-        <div class="icon">${STATE_ICONS[s.state] || '\u25CB'}</div>
+        <div class="icon">${STATE_ICONS[s.state] ?? '\u25CB'}</div>
         <div class="info">
           <div class="name">${escapeHtml(dirName(s.cwd))}</div>
           ${s.message ? `<div class="message">${escapeHtml(s.message)}</div>` : ''}
+          ${dur ? `<div class="message">${escapeHtml(dur)}</div>` : ''}
         </div>
-        <div class="time">${formatTime(s.timestamp)}</div>
+        <div class="time" data-ts="${escapeHtml(String(s.timestamp))}">${formatTime(s.timestamp)}</div>
       </div>
-    </div>
-  `).join('');
+    </div>`;
+  }).join('');
 
   list.querySelectorAll('.item').forEach(setupItem);
 }
@@ -198,26 +247,29 @@ function setupItem(item) {
     if (Math.abs(e.deltaX) < Math.abs(e.deltaY)) return;
     e.preventDefault();
     e.stopPropagation();
-    if (triggered) return;
+    if (triggered || swipeCooldown) return;
 
     clearTimeout(decayTimer);
     offsetX += e.deltaX * -1.5;
-    offsetX = Math.max(-360, Math.min(0, offsetX)); // only allow left swipe
+    offsetX = Math.max(-360, Math.min(360, offsetX));
 
     item.classList.add('swiping');
     inner.style.transform = `translateX(${offsetX}px)`;
 
-    if (offsetX < -THRESHOLD) {
-      // Left swipe -> dismiss
+    if (Math.abs(offsetX) > THRESHOLD) {
+      // Swipe either direction -> dismiss
+      const dir = offsetX < 0 ? '-100%' : '100%';
       triggered = true;
+      swipeCooldown = true;
       item.classList.remove('swiping');
       inner.style.transition = 'transform 0.2s, opacity 0.2s';
-      inner.style.transform = 'translateX(-100%)';
+      inner.style.transform = `translateX(${dir})`;
       inner.style.opacity = '0';
       setTimeout(() => {
-        dismissFromFile(pid);
-        setTimeout(() => render(readStateFile()), 50);
+        const data = dismissFromFile(pid);
+        setTimeout(() => render(data), 50);
       }, 200);
+      setTimeout(() => { swipeCooldown = false; }, 600);
       return;
     }
 
@@ -235,16 +287,48 @@ function setupItem(item) {
     e.preventDefault();
     if (triggered) return;
     writeSignal(pid);
+    const data = ackInFile(pid);
+    if (data) render(markOrphanSessions(data));
     window.blur();
   });
 }
+
+function updateTimes() {
+  document.querySelectorAll('.time[data-ts]').forEach(el => {
+    el.textContent = formatTime(Number(el.dataset.ts));
+  });
+}
+
+function markOrphanSessions(state) {
+  if (!Array.isArray(state)) return state;
+  for (const s of state) {
+    if (s.state === 'dead') continue;
+    try { process.kill(s.pid, 0); }
+    catch { s.state = 'dead'; }
+  }
+  return state;
+}
+
+// Watch signal file — notification click or menubar click wrote a PID; ack it
+try {
+  fs.watch(SIGNAL_FILE, { persistent: false }, () => {
+    try {
+      const pid = parseInt(fs.readFileSync(SIGNAL_FILE, 'utf-8').trim(), 10);
+      if (pid) {
+        const data = ackInFile(pid);
+        if (data) render(markOrphanSessions(data));
+      }
+    } catch {}
+  });
+} catch {}
 
 // Watch state file (unreliable on macOS with atomic mv) + poll fallback
 fs.watch(STATE_FILE, { persistent: false }, () => {
   setTimeout(() => render(readStateFile()), 100);
 });
 setTimeout(() => render(readStateFile()), 100);
-setInterval(() => render(readStateFile()), 3000);
+setInterval(() => render(markOrphanSessions(readStateFile())), 3000);
+setInterval(updateTimes, 30000);
 </script>
 </body>
 </html>
