@@ -30,8 +30,8 @@ Hook scripts (bash, run by Claude Code process)
         +- tray badge count
         +- click -> writes .focus-signal -> extension focuses terminal
         +- swipe left -> dismisses from state
-        +- Clear button -> dismisses all seen/dead sessions
-        +- Cmd+Shift+C -> focuses most recent attention/done session
+        +- Clear button -> dismisses dead sessions
+        +- Cmd+Shift+C -> cycles through live sessions
 ```
 
 **Terminal identification**: Hook scripts walk the process tree (`$PPID` -> parent's PPID) to find the terminal shell PID. The VSCode extension matches this against `terminal.processId`. This is the only reliable way to distinguish multiple Claude Code sessions.
@@ -63,7 +63,12 @@ Hook scripts (bash, run by Claude Code process)
 - **Menubar renderer uses `nodeIntegration: true` with direct `require('fs')`** instead of IPC. The `menubar` package's popup blur races with click events, making IPC unreliable.
 - **`fs.watch` + 3s polling** because macOS `fs.watch` misses atomic `mv` writes.
 - **`startedAt` in state JSON** tracks when a session entered `thinking` state. The renderer computes elapsed time (thinking) or total duration (done/seen) from this field.
-- **`Cmd+Shift+C` global shortcut** registered via Electron `globalShortcut`. Finds the most recent `attention`/`done` session (fallback to `thinking`) and writes its PID to `.focus-signal`.
+- **`Cmd+Shift+C` global shortcut** registered via Electron `globalShortcut`. Cycles through live sessions (verified via `process.kill(pid, 0)`) by timestamp desc. Resets to first when the session set changes. Writes target PID to `.focus-signal`.
+- **Thinking hook captures user prompt** from stdin JSON `.prompt` field. Menubar shows what the user asked while Claude is thinking.
+- **Window focus uses osascript + code CLI**: `osascript` activates VSCode app (pierces Spaces/Stage Manager), `code <folder>` selects the correct window.
+- **Click item hides popup** via `ipcRenderer.send('hide-window')` → `ipcMain` calls `mb.hideWindow()`. More reliable than `window.blur()` for collapsing the menubar popup.
+- **`onDidChangeWindowState`** clears marker on active terminal when VSCode window regains focus. Shares `tryAckTerminal()` helper with `onDidChangeActiveTerminal`.
+- **Orphan detection persists to file**: `markOrphanSessions` writes `dead` state back to the state file (atomic write) so Clear button works reliably and dead sessions don't reappear on poll.
 - **All HTML interpolation uses `escapeHtml()`** because `nodeIntegration: true` means any XSS = RCE. Never interpolate state data into HTML without escaping.
 
 ## Running

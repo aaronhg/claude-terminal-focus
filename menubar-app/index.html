@@ -93,7 +93,7 @@
 </style>
 </head>
 <body>
-<div id="header"><span>Claude Code Sessions</span><div class="header-actions"><button id="clear" class="header-btn" style="font-size:13px" onclick="dismissAllInactive()" disabled>&#x232B;</button><button id="refresh" class="header-btn" onclick="render(readStateFile())">&#x21bb;</button></div></div>
+<div id="header"><span>Claude Code Sessions</span><div class="header-actions"><button id="clear" class="header-btn" style="font-size:13px" onclick="dismissAllDead()" disabled>&#x232B;</button><button id="refresh" class="header-btn" onclick="render(readStateFile())">&#x21bb;</button></div></div>
 <div id="list"></div>
 <div id="empty" style="display:none">No active sessions</div>
 
@@ -101,6 +101,7 @@
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+const { ipcRenderer } = require('electron');
 
 const HOOKS_DIR = path.join(os.homedir(), '.claude', 'hooks');
 const STATE_FILE = path.join(HOOKS_DIR, '.focus-state.json');
@@ -128,8 +129,8 @@ function dismissFromFile(pid) {
   catch { return []; }
 }
 
-function dismissAllInactive() {
-  try { render(updateStateFile(s => s.filter(x => x.state !== 'seen' && x.state !== 'dead'))); }
+function dismissAllDead() {
+  try { render(updateStateFile(s => s.filter(x => x.state !== 'dead'))); }
   catch {}
 }
 
@@ -212,7 +213,7 @@ function render(state) {
   empty.style.display = 'none';
   state.sort((a, b) => b.timestamp - a.timestamp);
 
-  const hasInactive = state.some(s => s.state === 'seen' || s.state === 'dead');
+  const hasInactive = state.some(s => s.state === 'dead');
   document.getElementById('clear').disabled = !hasInactive;
 
   list.innerHTML = state.map(s => {
@@ -223,7 +224,7 @@ function render(state) {
         <div class="icon">${STATE_ICONS[s.state] ?? '\u25CB'}</div>
         <div class="info">
           <div class="name">${escapeHtml(dirName(s.cwd))}</div>
-          ${s.message ? `<div class="message">${escapeHtml(s.message)}</div>` : ''}
+          <div class="message">${s.message ? escapeHtml(s.message) : '&nbsp;'}</div>
           ${dur ? `<div class="message">${escapeHtml(dur)}</div>` : ''}
         </div>
         <div class="time" data-ts="${escapeHtml(String(s.timestamp))}">${formatTime(s.timestamp)}</div>
@@ -289,7 +290,7 @@ function setupItem(item) {
     writeSignal(pid);
     const data = ackInFile(pid);
     if (data) render(markOrphanSessions(data));
-    window.blur();
+    ipcRenderer.send('hide-window');
   });
 }
 
@@ -301,10 +302,18 @@ function updateTimes() {
 
 function markOrphanSessions(state) {
   if (!Array.isArray(state)) return state;
+  let changed = false;
   for (const s of state) {
     if (s.state === 'dead') continue;
     try { process.kill(s.pid, 0); }
-    catch { s.state = 'dead'; }
+    catch { s.state = 'dead'; changed = true; }
+  }
+  if (changed) {
+    try {
+      const tmp = STATE_FILE + '.tmp';
+      fs.writeFileSync(tmp, JSON.stringify(state, null, 2));
+      fs.renameSync(tmp, STATE_FILE);
+    } catch {}
   }
   return state;
 }

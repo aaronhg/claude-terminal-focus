@@ -25,11 +25,12 @@ mkdir -p "$HOOKS_DIR"
 cp "$SCRIPT_DIR/hooks/notify-stop.sh" "$HOOKS_DIR/"
 cp "$SCRIPT_DIR/hooks/notify-attention.sh" "$HOOKS_DIR/"
 cp "$SCRIPT_DIR/hooks/notify-thinking.sh" "$HOOKS_DIR/"
-chmod +x "$HOOKS_DIR/notify-stop.sh" "$HOOKS_DIR/notify-attention.sh" "$HOOKS_DIR/notify-thinking.sh"
+cp "$SCRIPT_DIR/hooks/_upsert-state.sh" "$HOOKS_DIR/"
+chmod +x "$HOOKS_DIR/notify-stop.sh" "$HOOKS_DIR/notify-attention.sh" "$HOOKS_DIR/notify-thinking.sh" "$HOOKS_DIR/_upsert-state.sh"
 echo "✓ Hook scripts installed to $HOOKS_DIR"
 
 # Install VSCode extension via symlink
-ln -sf "$SCRIPT_DIR/vscode-extension" "$EXT_DIR"
+ln -sfn "$SCRIPT_DIR/vscode-extension" "$EXT_DIR"
 echo "✓ VSCode extension linked at $EXT_DIR"
 
 # Merge hooks into settings.json
@@ -117,8 +118,7 @@ PLIST
 echo "✓ LaunchAgent written to $PLIST_PATH"
 
 # Stop old instance if running, then start
-launchctl bootout "gui/$(id -u)/$PLIST_LABEL" 2>/dev/null || true
-launchctl bootstrap "gui/$(id -u)" "$PLIST_PATH"
+"$SCRIPT_DIR/start.sh"
 echo "✓ Menubar app started"
 
 echo ""

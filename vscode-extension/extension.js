@@ -130,12 +130,11 @@ function activate(context) {
       const pid = await t.processId;
       if (pid === targetPid) {
         try { fs.unlinkSync(FOCUS_FILE); } catch {}
-        // Activate this VSCode window via CLI, then focus terminal
+        // Bring app to foreground + select correct window, then focus terminal
+        const appName = vscode.env.appName || 'Visual Studio Code';
+        execFile('osascript', ['-e', `tell application "${appName}" to activate`]);
         const folder = vscode.workspace.workspaceFolders?.[0]?.uri?.fsPath;
-        if (folder) {
-          execFile('code', [folder]);
-          await new Promise(r => setTimeout(r, 600));
-        }
+        if (folder) execFile('code', [folder]);
         t.show(false);
         await clearMarker(pid);
         ackStateFile(targetPid);
@@ -144,14 +143,24 @@ function activate(context) {
     }
   };
 
-  // Clear marker when user switches to a tracked terminal
-  const onActiveChange = async (t) => {
-    if (!t || renaming) return;
+  async function tryAckTerminal(t) {
+    if (!t) return;
     const pid = await t.processId;
     if (tracked.has(pid)) {
       await clearMarker(pid);
       ackStateFile(pid);
     }
+  }
+
+  // Clear marker when user switches to a tracked terminal
+  const onActiveChange = (t) => {
+    if (renaming) return;
+    tryAckTerminal(t);
+  };
+
+  // Window regains focus — clear marker on active terminal if tracked
+  const onWindowState = (e) => {
+    if (e.focused) tryAckTerminal(vscode.window.activeTerminal);
   };
 
   async function clearMarker(pid) {
@@ -194,6 +203,7 @@ function activate(context) {
     focusWatcher.onDidCreate(onFocus),
     focusWatcher.onDidChange(onFocus),
     vscode.window.onDidChangeActiveTerminal(onActiveChange),
+    vscode.window.onDidChangeWindowState(onWindowState),
     vscode.window.onDidCloseTerminal(onClose),
     thinkingWatcher,
     pendingWatcher,

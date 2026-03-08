@@ -28,9 +28,10 @@ This tool sends a macOS notification when Claude Code needs you. Click the notif
 - **Smart skip** — no notification if you're already looking at that terminal
 - **Precise matching** — uses shell PID to distinguish multiple sessions
 - **Menubar app** — global overview of all Claude Code sessions across all VSCode windows; click to focus, swipe to dismiss
+- **Prompt display** — menubar shows what you asked while Claude is thinking
 - **Duration display** — shows elapsed time while Claude is thinking, total time when done
-- **Global shortcut** — `Cmd+Shift+C` to instantly focus the most recent session needing attention
-- **Clear inactive** — one-click button to dismiss all completed/dead sessions
+- **Global shortcut** — `Cmd+Shift+C` cycles through live sessions (skips dead processes)
+- **Clear dead** — one-click button to dismiss dead sessions
 
 ## Install
 

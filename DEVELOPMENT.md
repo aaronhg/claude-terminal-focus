@@ -130,6 +130,22 @@ Previously the menubar app required manual `cd menubar-app && npm start`. Added 
 
 Key iteration: the electron shim at `node_modules/.bin/electron` (a symlink to `cli.js`) fails with EPERM under LaunchAgent's restricted environment. Fix: point `ProgramArguments` directly at `electron/dist/Electron.app/Contents/MacOS/Electron`.
 
+### 13. Click-to-hide, cycle shortcut, prompt display, window focus, Clear scope, window state, orphan persistence
+
+Eight enhancements:
+
+- **Click hides popup**: Replaced `window.blur()` with `ipcRenderer.send('hide-window')` → `ipcMain` calls `mb.hideWindow()`. `window.blur()` only blurred the webview but didn't collapse the menubar popup.
+- **Cmd+Shift+C cycles live sessions**: Instead of always jumping to the most recent session, the shortcut cycles through sessions verified alive via `process.kill(pid, 0)`. Cycle signature uses PID only (not state) so ack transitions don't reset the index.
+- **Thinking shows user prompt**: `notify-thinking.sh` extracts `.prompt` from Claude Code's stdin JSON. Menubar shows what the user asked while Claude is thinking (previously empty).
+- **Window focus via osascript**: Replaced `code <folder>` alone with `osascript activate` (pierces Spaces/Stage Manager) + `code <folder>` (selects correct window). Removed the 200ms/600ms sleep.
+- **Clear button scoped to dead only**: Previously dismissed both `seen` and `dead` sessions. Now only removes `dead` sessions so completed tasks remain visible.
+- **Window regain focus clears marker**: Added `onDidChangeWindowState` listener. When VSCode window regains focus, auto-clears marker on active terminal. Shares `tryAckTerminal()` helper with `onDidChangeActiveTerminal`.
+- **Orphan detection persists to file**: `markOrphanSessions` now writes `dead` state back to the state file (atomic tmp+mv). Previously display-only — dead sessions would reappear on next poll and Clear button couldn't remove them reliably.
+
+### Planned: Session history (G)
+
+Append-only `~/.claude/hooks/.focus-history.jsonl` — one JSONL entry per completed task. `_upsert-state.sh` appends when thinking→done/attention. Menubar renderer shows today's summary ("Today: 5 tasks, 1h 23m"). Not yet implemented.
+
 ## Key decisions
 
 | Decision | Why |
@@ -142,7 +158,14 @@ Key iteration: the electron shim at `node_modules/.bin/electron` (a symlink to `
 | Direct `fs` in renderer, no IPC | `menubar` popup blur races with click events; direct fs eliminates the problem |
 | All HTML via `escapeHtml()` | `nodeIntegration: true` means any XSS = RCE; every interpolated value must be escaped |
 | `startedAt` only set on `thinking` | Other state transitions preserve existing `startedAt` so duration = `timestamp - startedAt` |
-| `Cmd+Shift+C` global shortcut | Electron `globalShortcut` — prefers attention/done, falls back to thinking |
+| `Cmd+Shift+C` cycle shortcut | Cycles through live sessions (process.kill check); resets on set change |
+| Click hides popup via IPC | `window.blur()` doesn't collapse menubar popup; `ipcRenderer` → `mb.hideWindow()` does |
+| osascript + code for focus | osascript pierces Spaces/Stage Manager; code CLI selects correct window |
+| Clear only removes dead | Seen sessions preserved for reference; dead sessions cleaned up |
+| Cycle sig uses PID only | State changes (done→seen from ack) don't reset cycle index |
+| `onDidChangeWindowState` | Auto-clear marker when window regains focus; shares `tryAckTerminal` |
+| Orphan state persisted | `markOrphanSessions` writes dead state to file so Clear button works reliably |
+| Thinking shows prompt | Hook extracts `.prompt` from stdin; menubar shows what user asked |
 | `fs.watch` + 3s polling | macOS `fs.watch` misses atomic `mv` writes; polling ensures consistency |
 | Shared `_upsert-state.sh` | Eliminates duplicated jq upsert logic across 3 hook scripts |
 | Atomic file writes (`tmp` + `mv`) | Prevents readers from seeing partial JSON |

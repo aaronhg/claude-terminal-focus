@@ -1,4 +1,4 @@
-const { app, globalShortcut } = require('electron');
+const { app, globalShortcut, ipcMain } = require('electron');
 const { menubar } = require('menubar');
 const path = require('path');
 const fs = require('fs');
@@ -37,19 +37,31 @@ function updateTrayBadge() {
   mb.tray.setTitle(count > 0 ? String(count) : '');
 }
 
-function focusMostRecentSession() {
+let cycleIndex = 0;
+let lastActionableSig = '';
+
+function focusCycleSession() {
   const state = readState();
   if (!state.length) return;
-
-  // Sort by timestamp descending
   state.sort((a, b) => b.timestamp - a.timestamp);
 
-  // Prefer attention/done, fallback to thinking
-  const target = state.find(s => s.state === 'attention' || s.state === 'done')
-    || state.find(s => s.state === 'thinking');
-  if (target) {
-    fs.writeFileSync(SIGNAL_FILE, String(target.pid));
+  const actionable = state.filter(s => {
+    if (s.state === 'dead') return false;
+    try { process.kill(s.pid, 0); return true; } catch { return false; }
+  });
+  if (!actionable.length) return;
+
+  // Reset if set of actionable sessions changed
+  const sig = actionable.map(s => s.pid).join(',');
+  if (sig !== lastActionableSig) {
+    cycleIndex = 0;
+    lastActionableSig = sig;
   }
+
+  cycleIndex = cycleIndex % actionable.length;
+  const target = actionable[cycleIndex];
+  fs.writeFileSync(SIGNAL_FILE, String(target.pid));
+  cycleIndex++;
 }
 
 mb.on('ready', () => {
@@ -65,7 +77,9 @@ mb.on('ready', () => {
   updateTrayBadge();
   setInterval(() => updateTrayBadge(), 3000);
 
-  globalShortcut.register('CommandOrControl+Shift+C', focusMostRecentSession);
+  globalShortcut.register('CommandOrControl+Shift+C', focusCycleSession);
+
+  ipcMain.on('hide-window', () => mb.hideWindow());
 });
 
 app.on('will-quit', () => {
