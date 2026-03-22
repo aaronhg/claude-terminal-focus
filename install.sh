@@ -29,9 +29,10 @@ cp "$SCRIPT_DIR/hooks/_upsert-state.sh" "$HOOKS_DIR/"
 chmod +x "$HOOKS_DIR/notify-stop.sh" "$HOOKS_DIR/notify-attention.sh" "$HOOKS_DIR/notify-thinking.sh" "$HOOKS_DIR/_upsert-state.sh"
 echo "✓ Hook scripts installed to $HOOKS_DIR"
 
-# Install VSCode extension via symlink
-ln -sfn "$SCRIPT_DIR/vscode-extension" "$EXT_DIR"
-echo "✓ VSCode extension linked at $EXT_DIR"
+# Install VSCode extension (copy)
+rm -rf "$EXT_DIR"
+cp -r "$SCRIPT_DIR/vscode-extension" "$EXT_DIR"
+echo "✓ VSCode extension copied to $EXT_DIR"
 
 # Merge hooks into settings.json
 HOOKS_JSON=$(jq -n \
@@ -77,11 +78,17 @@ if [ -d "$SCRIPT_DIR/menubar-app" ]; then
   echo "✓ Menubar app dependencies installed"
 fi
 
+# Copy menubar app to ~/.claude/menubar-app/
+MENUBAR_DEST="$CLAUDE_DIR/menubar-app"
+rm -rf "$MENUBAR_DEST"
+cp -r "$SCRIPT_DIR/menubar-app" "$MENUBAR_DEST"
+echo "✓ Menubar app copied to $MENUBAR_DEST"
+
 # Install LaunchAgent for menubar app
-PLIST_LABEL="com.aaron.claude-menubar"
+PLIST_LABEL="com.claude-terminal-focus.menubar"
 PLIST_PATH="$HOME/Library/LaunchAgents/$PLIST_LABEL.plist"
-ELECTRON_BIN="$SCRIPT_DIR/menubar-app/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron"
-APP_DIR="$SCRIPT_DIR/menubar-app"
+ELECTRON_BIN="$MENUBAR_DEST/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron"
+APP_DIR="$MENUBAR_DEST"
 NODE_BIN_DIR="$(dirname "$(which node)")"
 
 mkdir -p "$HOME/Library/LaunchAgents"

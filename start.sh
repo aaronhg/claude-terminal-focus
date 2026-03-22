@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-PLIST_LABEL="com.aaron.claude-menubar"
+PLIST_LABEL="com.claude-terminal-focus.menubar"
 PLIST_PATH="$HOME/Library/LaunchAgents/$PLIST_LABEL.plist"
 
 # Stop existing instance (ignore errors if not running)

@@ -43,19 +43,9 @@ Hook scripts can't talk to VSCode extensions directly. Solution: file-based sign
 
 On notification click, `terminal-notifier -execute` writes `.focus-signal` with the PID. Extension picks it up and calls `terminal.show()`.
 
-### 6. Tab marker (●)
+### 6. Notification in extension
 
-Wanted a visual indicator for terminals with unread notifications. VSCode Terminal API has readonly `name` — no setter. Workaround: `workbench.action.terminal.renameWithArg` command, which renames the active terminal.
-
-This created two sub-problems:
-- **Must be active to rename**: Need `terminal.show(false)` to make it active, rename, then switch back. Causes brief flicker.
-- **Race condition**: Switching to rename triggers `onDidChangeActiveTerminal`, which immediately clears the marker. Fixed with a `renaming` flag to suppress the handler during rename operations.
-
-### 7. Smart skip
-
-If you're already looking at the terminal, no notification needed. Moved `terminal-notifier` call from hook script into the extension, which checks `vscode.window.activeTerminal === targetTerminal` before deciding to notify.
-
-This changed the architecture: hook scripts only write a JSON signal file. The extension handles all notification logic.
+Moved `terminal-notifier` call from hook script into the extension. Hook scripts only write a JSON signal file. The extension handles all notification logic, always sending notifications regardless of which terminal is active.
 
 ### 8. Packaging
 
@@ -76,11 +66,8 @@ Hook script (runs in Claude Code process)
   │     │
   │     ▼ FileSystemWatcher
   │   VSCode extension
-  │     ├─ activeTerminal? → skip
-  │     ├─ execFile terminal-notifier
-  │     │    └─ on click → writes .focus-signal
-  │     └─ rename terminal: "● 2.1.69"
-  │          └─ onDidChangeActiveTerminal → rename back
+  │     └─ execFile terminal-notifier
+  │          └─ on click → writes .focus-signal
   │
   └─▶ upserts .focus-state.json (shared across all sessions)
         │
@@ -123,7 +110,7 @@ The three hook scripts shared ~80% identical code for upserting `_focus-state.js
 
 Previously the menubar app required manual `cd menubar-app && npm start`. Added macOS LaunchAgent integration:
 
-- `install.sh` dynamically generates a plist at `~/Library/LaunchAgents/com.aaron.claude-menubar.plist` with resolved paths (supports nvm by detecting `$(which node)` directory)
+- `install.sh` dynamically generates a plist at `~/Library/LaunchAgents/com.claude-terminal-focus.menubar.plist` with resolved paths (supports nvm by detecting `$(which node)` directory)
 - `RunAtLoad: true` for login auto-start, `KeepAlive: false` so manual stop stays stopped
 - `start.sh` / `stop.sh` wrappers around `launchctl bootstrap` / `bootout` (modern API, not deprecated `load`/`unload`)
 - `uninstall.sh` cleans up the plist
@@ -132,15 +119,29 @@ Key iteration: the electron shim at `node_modules/.bin/electron` (a symlink to `
 
 ### 13. Click-to-hide, cycle shortcut, prompt display, window focus, Clear scope, window state, orphan persistence
 
-Eight enhancements:
+Seven enhancements:
 
 - **Click hides popup**: Replaced `window.blur()` with `ipcRenderer.send('hide-window')` → `ipcMain` calls `mb.hideWindow()`. `window.blur()` only blurred the webview but didn't collapse the menubar popup.
 - **Cmd+Shift+C cycles live sessions**: Instead of always jumping to the most recent session, the shortcut cycles through sessions verified alive via `process.kill(pid, 0)`. Cycle signature uses PID only (not state) so ack transitions don't reset the index.
 - **Thinking shows user prompt**: `notify-thinking.sh` extracts `.prompt` from Claude Code's stdin JSON. Menubar shows what the user asked while Claude is thinking (previously empty).
 - **Window focus via osascript**: Replaced `code <folder>` alone with `osascript activate` (pierces Spaces/Stage Manager) + `code <folder>` (selects correct window). Removed the 200ms/600ms sleep.
 - **Clear button scoped to dead only**: Previously dismissed both `seen` and `dead` sessions. Now only removes `dead` sessions so completed tasks remain visible.
-- **Window regain focus clears marker**: Added `onDidChangeWindowState` listener. When VSCode window regains focus, auto-clears marker on active terminal. Shares `tryAckTerminal()` helper with `onDidChangeActiveTerminal`.
+- **Window regain focus acks state**: Added `onDidChangeWindowState` listener. When VSCode window regains focus, auto-acks active terminal state.
 - **Orphan detection persists to file**: `markOrphanSessions` now writes `dead` state back to the state file (atomic tmp+mv). Previously display-only — dead sessions would reappear on next poll and Clear button couldn't remove them reliably.
+
+### 14. Copy-based install, signal file cleanup, hook write order
+
+Three reliability fixes:
+
+- **Copy replaces symlink**: `install.sh` copies extension and menubar app to `~/.vscode/extensions/` and `~/.claude/menubar-app/` instead of symlinking to the repo. Deleting the repo no longer breaks the installation. Plist label changed from `com.aaron.claude-menubar` to `com.claude-terminal-focus.menubar`.
+- **Signal files deleted after read**: Extension deletes `.focus-pending` and `.focus-signal` immediately after reading. Prevents macOS FSEvents directory-level watcher from re-firing `onPending`/`onFocus` when other files in the same directory change (e.g., `_upsert-state.sh` doing atomic `mv` to `.focus-state.json`).
+- **Hook write order**: `notify-stop.sh` and `notify-attention.sh` now call `_upsert-state.sh` before writing `.focus-pending`. Previously the extension could react to `.focus-pending` before the state file reflected `done`/`attention`, causing `ackStateFile` to silently no-op.
+
+### 15. Remove terminal tab renaming
+
+Removed all terminal tab marker code (`● `, `▸ ` prefixes). The `renaming` flag, `tracked` Map, `renameTo()`, `clearMarker()`, `onDidChangeActiveTerminal` handler, and thinking file watcher were all deleted. The extension no longer touches terminal names or switches terminal focus during state transitions.
+
+Removed smart skip (active terminal check). Notifications are always sent regardless of which terminal is focused. The ownership check (does this PID belong to this window?) iterates terminals to prevent duplicate notifications across VSCode windows.
 
 ### Planned: Session history (G)
 
@@ -152,7 +153,7 @@ Append-only `~/.claude/hooks/.focus-history.jsonl` — one JSONL entry per compl
 |----------|-----|
 | File-based signaling, not HTTP | No server to manage, works offline, zero dependencies |
 | PID matching, not name/cwd | Only reliable way to distinguish identical terminals |
-| Notification logic in extension, not hook | Extension knows which terminal is active; hook doesn't |
+| Notification logic in extension, not hook | Extension checks terminal ownership; hook doesn't know which window owns the terminal |
 | `execFile` over `exec` | Prevents shell injection from message content |
 | `jq` for settings merge | Preserves existing user settings, no manual JSON editing |
 | Direct `fs` in renderer, no IPC | `menubar` popup blur races with click events; direct fs eliminates the problem |
@@ -163,7 +164,7 @@ Append-only `~/.claude/hooks/.focus-history.jsonl` — one JSONL entry per compl
 | osascript + code for focus | osascript pierces Spaces/Stage Manager; code CLI selects correct window |
 | Clear only removes dead | Seen sessions preserved for reference; dead sessions cleaned up |
 | Cycle sig uses PID only | State changes (done→seen from ack) don't reset cycle index |
-| `onDidChangeWindowState` | Auto-clear marker when window regains focus; shares `tryAckTerminal` |
+| `onDidChangeWindowState` | Auto-ack active terminal state when window regains focus |
 | Orphan state persisted | `markOrphanSessions` writes dead state to file so Clear button works reliably |
 | Thinking shows prompt | Hook extracts `.prompt` from stdin; menubar shows what user asked |
 | `fs.watch` + 3s polling | macOS `fs.watch` misses atomic `mv` writes; polling ensures consistency |
@@ -171,3 +172,7 @@ Append-only `~/.claude/hooks/.focus-history.jsonl` — one JSONL entry per compl
 | Atomic file writes (`tmp` + `mv`) | Prevents readers from seeing partial JSON |
 | LaunchAgent, not login item | `launchctl bootstrap/bootout` gives precise start/stop control; `RunAtLoad` for login auto-start |
 | Direct Electron binary in plist | `node_modules/.bin/electron` shim gets EPERM under LaunchAgent |
+| Copy, not symlink | Deleting the repo doesn't break installed extension or menubar app |
+| Delete signal files after read | Prevents FSEvents directory-level re-fires from sibling file changes |
+| State before signal in hooks | Extension sees correct state when reacting to signal; eliminates ack race |
+| Always notify, no smart skip | Notifications always sent; avoids terminal iteration for active check that caused scroll jitter |
